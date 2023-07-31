@@ -11,8 +11,45 @@ import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
 
 class b2dDecoder:
+    """
+    Custom decoder for blob2d output.
+
+    Parameters
+    ----------
+    target_filename: str
+        Filename to decode.
+    ouput_columns: list
+        A list of column names that will be selected to appear in the output.
+    """
+    
     def __init__(self, target_filename=None, output_columns=None):
-        pass
+    def __init__(self, target_filename, output_columns):
+        if len(output_columns) == 0:
+            msg = "output_columns cannot be empty."
+            logger.error(msg)
+            raise RuntimeError(msg)
+        self.target_filename = target_filename
+        self.output_columns = output_columns
+        self.output_type = OutputType('sample')
+    
+    def getBlobVelocity():
+        import numpy as np
+        from xbout import open_boutdataset
+        
+        ds = open_boutdataset(chunks={"t": 4})
+        ds = ds.squeeze(drop=True)
+        dx = ds["dx"].isel(x=0).values
+        ds = ds.drop("x")
+        ds = ds.assign_coords(x=np.arange(ds.sizes["x"])*dx)
+        
+        background_density = 1.0
+        ds["delta_n"] = ds["n"] - background_density
+        integrated_density = ds.bout.integrate_midpoints("delta_n")
+        ds["delta_n*x"] = ds["delta_n"] * ds["x"]
+        ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
+        v_x = ds["CoM_x"].differentiate("t")
+        
+        return max(v_x)# Maybe redefine, this will do for now
     
     def parse_sim_output(self, run_info={}):
         return {}
@@ -70,7 +107,7 @@ encoder = uq.encoders.GenericEncoder(
     delimiter='$',
     target_filename='blobDir/BOUT.inp')
 execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=10'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
-decoder = uq.decoders.SimpleCSV(
+decoder = b2dDecoder(
         target_filename=output_filename,
         output_columns=output_columns)
 actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
