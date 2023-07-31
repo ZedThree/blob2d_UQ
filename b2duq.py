@@ -2,6 +2,29 @@
 Place in folder with blob2d, b2d.template, a folder called blobDir and possibly a decoder
 Running will run the SC campaign on blob2d as defined below
 """
+    """
+    Returns the flux surface corresponding to a set of miller parameters.
+
+    Parameters
+    ----------
+    A
+        Aspect ratio
+    kappa
+        Elongation
+    delta
+        Triangularity
+    R0
+        Major radius
+    Theta
+        Poloidal angle
+
+    Returns
+   -------
+    R_s
+        Set of major radii
+    R_z
+        Set of vertical coordinates
+    """
 
 import easyvvuq as uq
 import numpy as np
@@ -10,9 +33,8 @@ import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
 
-import os
 from string import Template
-import logging
+import logging#???????????????????????????????????????????????????????????????????????????????????
 
 class b2dEncoder:
     """Encoder for blob2d.
@@ -99,12 +121,6 @@ class b2dDecoder:
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
-        
-    #def _get_output_path(run_info=None, outfile=None):
-    #    run_path = run_info['run_dir']
-    #    if not os.path.isdir(run_path):
-    #        raise RuntimeError(f"Run directory does not exist: {run_path}")
-    #    return os.path.join(run_path, outfile)
     
     def getBlobVelocity(self, out_path):
         import numpy as np
@@ -125,13 +141,14 @@ class b2dDecoder:
         ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
         v_x = ds["CoM_x"].differentiate("t")
         
-        return {"maxV": [float(max(v_x))]}# Maybe redefine, this will do for now - float or other datatype?  eg numpy
+        return {"maxV": [float(max(v_x))]}# Add other velocity / distance metrics?
     
     def parse_sim_output(self, run_info={}):
-        #out_path = self._get_output_path(run_info, self.target_filename)
         out_path = os.path.join(run_info['run_dir'], self.target_filename)
         blobVels = self.getBlobVelocity(out_path)
         return blobVels
+
+###############################################################################
 
 def refine_sampling_plan(number_of_refinements):
         """
@@ -158,50 +175,77 @@ def refine_sampling_plan(number_of_refinements):
             data_frame = campaign.get_collation_result()
             analysis.adapt_dimension('f', data_frame)
             #analysis.adapt_dimension('f', data_frame, method='var')
+            
+###############################################################################
 
-# Define parameters & whoch are uncertain
-vary = {
-    "height": cp.Normal(0.5, 0.1),
-    "width": cp.Normal(0.09, 0.02)# Different distribution?
-}
-params = {
-    "Te0": {"type": "float", "default": 5.0},
-    "n0": {"type": "float", "default": 2.0e+18},
-    "D_vort": {"type": "float", "default": 1.0e-6},
-    "D_n": {"type": "float", "default": 1.0e-6},
-    "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
-    "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
+def defineParams():
+    # Define parameters & whoch are uncertain
+    vary = {
+            "height": cp.Normal(0.5, 0.1),
+            "width": cp.Normal(0.09, 0.02)# Different distribution?
+    }
+    params = {
+            "Te0": {"type": "float", "default": 5.0},
+            "n0": {"type": "float", "default": 2.0e+18},
+            "D_vort": {"type": "float", "default": 1.0e-6},
+            "D_n": {"type": "float", "default": 1.0e-6},
+            "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
+            "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
+            
+            "outfolder": {"type": "string", "default": "blobDir/"},
+            "d": {"type": "integer", "default": len(vary)}
+    }
+
+    # Note output filename and output value name
+    output_folder = params["outfolder"]["default"]
+    output_columns = ["maxV"]
     
-    "outfolder": {"type": "string", "default": "blobDir/"},
-    "d": {"type": "integer", "default": len(vary)}
-}
+    return output_folder, output_columns
 
-# Note output filename and output value name
-output_folder = params["outfolder"]["default"]
-output_columns = ["maxV"]
+def setupCampaign(output_folder, output_columns):
+    # Create & package encoder, decoder & executor into actions
+    
+    encoder = b2dEncoder(
+            template_fname='b2d.template',
+            delimiter='$',
+            target_filename='blobDir/BOUT.inp')
+    
+    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=6'.format(os.getcwd()))# 60+ timesteps resonable
+    
+    decoder = b2dDecoder(
+            target_filename=output_folder,# must use "target_filename" even though a folder for compatibility with executor
+            output_columns=output_columns)
+    
+    actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
 
-# Create encoder, decoder & executor
-encoder = b2dEncoder(
-    template_fname='b2d.template',
-    delimiter='$',
-    target_filename='blobDir/BOUT.inp')
-execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=6'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
-decoder = b2dDecoder(
-        target_filename=output_folder,
-        output_columns=output_columns)
-actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
+    campaign = uq.Campaign(name='sc_adaptive', work_dir='/tmp', params=params, actions=actions)
+    
+    return campaign
 
-# Create campaign and sampler
-campaign = uq.Campaign(name='sc_adaptive', work_dir='/tmp', params=params, actions=actions)
-sampler = uq.sampling.SCSampler(
-        vary=vary,
-        polynomial_order=1,
-        quadrature_rule="C",
-        sparse=True,
-        growth=True,
-        midpoint_level1=True,
-        dimension_adaptive=True)    
+def setupSampler():
+    sampler = uq.sampling.SCSampler(
+            vary=vary,
+            polynomial_order=1,
+            quadrature_rule="C",
+            sparse=True,
+            growth=True,
+            midpoint_level1=True,
+            dimension_adaptive=True) 
+    
+    return sampler
 
-# Run campaign
-campaign.set_sampler(sampler)
-campaign.execute().collate(progress_bar=True)
+def runCampaign(campaign, sampler):
+    campaign.set_sampler(sampler)
+    campaign.execute().collate(progress_bar=True)
+    print("Campaign run & collated successfuly")
+
+###############################################################################
+
+def main():
+    output_folder, output_columns = defineParams()
+    campaign = setupCampaign(output_folder, output_columns)
+    sampler = setupSampler()
+    runCampaign(campaign, sampler)
+
+if __name__ == "__main__":
+    main()
