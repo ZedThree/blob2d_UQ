@@ -10,6 +10,13 @@ import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
 
+class b2dDecoder:
+    def __init__(self, target_filename=None, output_columns=None):
+        pass
+    
+    def parse_sim_output(self, run_info={}):
+        return {}
+
 def refine_sampling_plan(number_of_refinements):
         """
         Refine the sampling plan.
@@ -62,7 +69,7 @@ encoder = uq.encoders.GenericEncoder(
     template_fname='b2d.template',
     delimiter='$',
     target_filename='blobDir/BOUT.inp')
-execute = ExecuteLocal('{}/blob2d -d blobDir nout=10'.format(os.getcwd()))# Add more timesteps later (slow) #########
+execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=10'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
 decoder = uq.decoders.SimpleCSV(
         target_filename=output_filename,
         output_columns=output_columns)
