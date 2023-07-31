@@ -99,11 +99,11 @@ class b2dDecoder:
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
         
-    def _get_output_path(run_info=None, outfile=None):
-        run_path = run_info['run_dir']
-        if not os.path.isdir(run_path):
-            raise RuntimeError(f"Run directory does not exist: {run_path}")
-        return os.path.join(run_path, outfile)
+    #def _get_output_path(run_info=None, outfile=None):
+    #    run_path = run_info['run_dir']
+    #    if not os.path.isdir(run_path):
+    #        raise RuntimeError(f"Run directory does not exist: {run_path}")
+    #    return os.path.join(run_path, outfile)
     
     def getBlobVelocity(self, out_path):
         import numpy as np
@@ -127,7 +127,8 @@ class b2dDecoder:
         return {"maxV": max(v_x)}# Maybe redefine, this will do for now
     
     def parse_sim_output(self, run_info={}):
-        out_path = self._get_output_path(run_info, self.target_filename)
+        #out_path = self._get_output_path(run_info, self.target_filename)
+        out_path = os.path.join(run_info['run_dir'], self.target_filename)
         blobVels = self.getBlobVelocity(out_path)
         return blobVel
 
@@ -183,7 +184,7 @@ encoder = b2dEncoder(
     template_fname='b2d.template',
     delimiter='$',
     target_filename='blobDir/BOUT.inp')
-execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=10'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
+execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=6'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
 decoder = b2dDecoder(
         target_filename=output_filename,
         output_columns=output_columns)
