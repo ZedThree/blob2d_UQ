@@ -22,8 +22,9 @@ class b2dDecoder:
         A list of column names that will be selected to appear in the output.
     """
     
-    def __init__(self, target_filename=None, output_columns=None):
     def __init__(self, target_filename, output_columns):
+        from easyvvuq import OutputType
+        
         if len(output_columns) == 0:
             msg = "output_columns cannot be empty."
             logger.error(msg)
@@ -31,10 +32,18 @@ class b2dDecoder:
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
+        
+    def _get_output_path(run_info=None, outfile=None):
+        run_path = run_info['run_dir']
+        if not os.path.isdir(run_path):
+            raise RuntimeError(f"Run directory does not exist: {run_path}")
+        return os.path.join(run_path, outfile)
     
-    def getBlobVelocity():
+    def getBlobVelocity(self, out_path):
         import numpy as np
         from xbout import open_boutdataset
+        
+        os.chdir(out_path)#################################### Need to unset this later or not?
         
         ds = open_boutdataset(chunks={"t": 4})
         ds = ds.squeeze(drop=True)
@@ -49,10 +58,12 @@ class b2dDecoder:
         ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
         v_x = ds["CoM_x"].differentiate("t")
         
-        return max(v_x)# Maybe redefine, this will do for now
+        return {"maxV": max(v_x)}# Maybe redefine, this will do for now
     
     def parse_sim_output(self, run_info={}):
-        return {}
+        out_path = self._get_output_path(run_info, self.target_filename)
+        blobVels = self.getBlobVelocity(out_path)
+        return blobVel
 
 def refine_sampling_plan(number_of_refinements):
         """
@@ -83,7 +94,7 @@ def refine_sampling_plan(number_of_refinements):
 # Define parameters & whoch are uncertain
 vary = {
     "height": cp.Normal(0.5, 0.1),
-    "width": cp.Normal(0.9, 0.02)# Different distribution?
+    "width": cp.Normal(0.09, 0.02)# Different distribution?
 }
 params = {
     "Te0": {"type": "float", "default": 5.0},
@@ -93,7 +104,7 @@ params = {
     "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
     "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
     
-    "outfile": {"type": "string", "default": "b2dout.csv"},####################################################
+    "outfile": {"type": "string", "default": "?????????"},####################################################
     "d": {"type": "integer", "default": len(vary)}
 }
 
