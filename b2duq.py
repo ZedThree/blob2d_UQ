@@ -14,11 +14,6 @@ import os
 from string import Template
 import logging
 
-def get_custom_template(template_txt, custom_delimiter='$'):
-    class CustomTemplate(Template):
-        delimiter = custom_delimiter
-    return CustomTemplate(template_txt)
-
 class b2dEncoder:
     """Encoder for blob2d.
 
@@ -69,6 +64,7 @@ class b2dEncoder:
 
         # Write target input file
         target_file_path = os.path.join(target_dir, self.target_filename)
+        os.mkdir(os.path.join(target_dir, "blobDir"))
         with open(target_file_path, 'w') as fp:
             fp.write(app_input_txt)
 
