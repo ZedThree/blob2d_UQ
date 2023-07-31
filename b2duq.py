@@ -89,6 +89,7 @@ class b2dDecoder:
     """
     
     def __init__(self, target_filename, output_columns):
+        # target_filename is a folder, but can't change variable name for compatibility with easyvvuq
         from easyvvuq import OutputType
         
         if len(output_columns) == 0:
@@ -124,13 +125,13 @@ class b2dDecoder:
         ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
         v_x = ds["CoM_x"].differentiate("t")
         
-        return {"maxV": max(v_x)}# Maybe redefine, this will do for now
+        return {"maxV": [float(max(v_x))]}# Maybe redefine, this will do for now - float or other datatype?  eg numpy
     
     def parse_sim_output(self, run_info={}):
         #out_path = self._get_output_path(run_info, self.target_filename)
         out_path = os.path.join(run_info['run_dir'], self.target_filename)
         blobVels = self.getBlobVelocity(out_path)
-        return blobVel
+        return blobVels
 
 def refine_sampling_plan(number_of_refinements):
         """
@@ -171,12 +172,12 @@ params = {
     "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
     "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
     
-    "outfile": {"type": "string", "default": "blobDir/BOUT.dmp.0.nc"},
+    "outfolder": {"type": "string", "default": "blobDir/"},
     "d": {"type": "integer", "default": len(vary)}
 }
 
 # Note output filename and output value name
-output_filename = params["outfile"]["default"]
+output_folder = params["outfolder"]["default"]
 output_columns = ["maxV"]
 
 # Create encoder, decoder & executor
@@ -186,7 +187,7 @@ encoder = b2dEncoder(
     target_filename='blobDir/BOUT.inp')
 execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=6'.format(os.getcwd()))# Add more timesteps later (worth mpi at all?)#########
 decoder = b2dDecoder(
-        target_filename=output_filename,
+        target_filename=output_folder,
         output_columns=output_columns)
 actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
 
@@ -199,7 +200,7 @@ sampler = uq.sampling.SCSampler(
         sparse=True,
         growth=True,
         midpoint_level1=True,
-        dimension_adaptive=True)
+        dimension_adaptive=True)    
 
 # Run campaign
 campaign.set_sampler(sampler)
