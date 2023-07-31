@@ -10,6 +10,76 @@ import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
 
+import os
+from string import Template
+import logging
+
+def get_custom_template(template_txt, custom_delimiter='$'):
+    class CustomTemplate(Template):
+        delimiter = custom_delimiter
+    return CustomTemplate(template_txt)
+
+class b2dEncoder:
+    """Encoder for blob2d.
+
+    Parameters
+    ----------
+
+    Attributes
+    ----------
+
+    """
+
+    def __init__(self, template_fname, delimiter='$', target_filename="app_input.txt"):
+        self.delimiter = delimiter
+        self.target_filename = target_filename
+        self.template_fname = template_fname
+
+    def encode(self, params={}, target_dir=''):
+        """Substitutes `params` into a template application input, saves in
+        `target_dir`
+
+        Parameters
+        ----------
+        params        : dict
+            Parameter information in dictionary.
+        target_dir    : str
+            Path to directory where application input will be written.
+        """
+
+        try:
+            with open(self.template_fname, 'r') as template_file:
+                template_txt = template_file.read()
+                self.template = Template(template_txt)
+        except FileNotFoundError:
+            raise RuntimeError(
+                "the template file specified ({}) does not exist".format(self.template_fname))
+
+        if not target_dir:
+            raise RuntimeError('No target directory specified to encoder')
+
+        str_params = {}
+        for key, value in params.items():
+            str_params[key] = str(value)
+
+        try:
+            app_input_txt = self.template.substitute(str_params)
+        except KeyError as e:
+            self._log_substitution_failure(e)
+
+        # Write target input file
+        target_file_path = os.path.join(target_dir, self.target_filename)
+        with open(target_file_path, 'w') as fp:
+            fp.write(app_input_txt)
+
+    def _log_substitution_failure(self, exception):
+        reasoning = (f"\nFailed substituting into template "
+                     f"{self.template_fname}.\n"
+                     f"KeyError: {str(exception)}.\n")
+        logging.error(reasoning)
+
+        raise KeyError(reasoning)
+
 class b2dDecoder:
     """
     Custom decoder for blob2d output.
@@ -104,16 +174,16 @@ params = {
     "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
     "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
     
-    "outfile": {"type": "string", "default": "?????????"},####################################################
+    "outfile": {"type": "string", "default": "blobDir/BOUT.dmp.0.nc"},
     "d": {"type": "integer", "default": len(vary)}
 }
 
 # Note output filename and output value name
 output_filename = params["outfile"]["default"]
-output_columns = ["blobVel"]
+output_columns = ["maxV"]
 
 # Create encoder, decoder & executor
-encoder = uq.encoders.GenericEncoder(
+encoder = b2dEncoder(
     template_fname='b2d.template',
     delimiter='$',
     target_filename='blobDir/BOUT.inp')
