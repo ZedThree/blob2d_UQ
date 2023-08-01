@@ -73,6 +73,11 @@ class b2dDecoder:
     
         return blobInfo
     
+    def showOutOptions():
+        print("""Possible outputs:
+            maxV: the maximum major radial CoM velocity achieved by the blob
+            maxX: the distance the blob propagates before disintegration""")
+    
     def parse_sim_output(self, run_info={}):
         """
         Parses a BOUT.dmp.*.nc file from the output of blob2d and converts it to the EasyVVUQ
@@ -171,6 +176,10 @@ def defineParams(paramFile=None):
         
         output_columns = ["maxV"]
         template = 'b2d.template'
+        
+        # Show user available and selected output options
+        b2dDecoder.showOutOptions()
+        print("Options selected: ", output_columns, "\n")
         
         return params, vary, output_columns, template
     
