@@ -1,5 +1,8 @@
 """
 Runs a dimension adaptive stochastic colocation UQ campaign on the blob2d model
+Should be run with python3 in the same folder as blob2d and a blob2d input template.
+
+Dependencies: easyvvuq-1.2, matplotlib-3.7.2 & xbout-0.3.5.
 """
 
 import easyvvuq as uq
@@ -7,10 +10,8 @@ import numpy as np
 import chaospy as cp
 import os
 import matplotlib.pyplot as plt
-from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
+from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
 
-from string import Template
-import logging
 from easyvvuq import OutputType
 from xbout import open_boutdataset
 
@@ -21,12 +22,9 @@ class b2dDecoder:
     Parameters
     ----------
     target_filename (str)
-        Filename to decode.
+        Name of blob2d output file to be decoded.
     ouput_columns (list)
-        A list of column names that will be selected to appear in the output.
-        We have changed this
-        to be a folder instead of a file but the variable name is unchanged so the
-        encoder is compatible with the execute module
+        List of output quantities to considered by the campaign
     """
     
     def __init__(self, target_filename, output_columns):
@@ -34,7 +32,20 @@ class b2dDecoder:
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
     
-    def getBlobVelocity(self, out_path):################################Other options
+    def getBlobInfo(self, out_path):    
+        """
+        Uses xbout to extract the data from blob2d output files and convert to useful quantities.
+        
+        Parameters
+        ----------
+        out_path (str)
+            Absolute path to the blob2d output files.
+
+        Returns
+        -------
+        blobInfo (dict)
+            Dictionary of quantities which may be called by the campaign.
+        """
         
         # Set working directory to location of b2d output files
         os.chdir(out_path)
@@ -54,12 +65,36 @@ class b2dDecoder:
         ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
         v_x = ds["CoM_x"].differentiate("t")
         
-        return {"maxV": [float(max(v_x))]}# Add other velocity / distance metrics?
+        blobInfo = {"maxV": [float(max(v_x))]}# Add other velocity / distance metrics?
+    
+        return blobInfo
     
     def parse_sim_output(self, run_info={}):
+        """
+        Parses a BOUT.dmp.*.nc file from the output of blob2d and converts it to the EasyVVUQ
+        internal dictionary based format.  The file is parsed in such a way that each column
+        appears as a vector QoI in the output dictionary.
+
+        E.g. if the file contains the LHS and `a` & `b` are specified as `output_columns` then:
+        a,b
+        1,2  >>>  {'a': [1, 3], 'b': [2, 4]}.
+        3,4
+
+        Parameters
+        ----------
+        run_info: dict
+            Information about the run used to construct the absolute path to
+            the blob2d output files.
+        
+        Returns
+        -------
+        outQtts (dict)
+            Dictionary of quantities which may be of interest
+        """
+        
         out_path = os.path.join(run_info['run_dir'], self.target_filename)
-        blobVels = self.getBlobVelocity(out_path)
-        return blobVels
+        outQtts = self.getBlobInfo(out_path)
+        return outQtts
 
 ###############################################################################
 
@@ -107,8 +142,6 @@ def defineParams(paramFile=None):
         Dictionary of parameters, their default values and their range of uncertainty.
     vary (dict)
         Dictionary of uncertain parameters and their distributions.
-    input_folder (str)
-        Name of folder to contain the blob2d input file, this is arbitrary but must be defined.
     output_columns (list)
         List of the quantities extracted by the decoder we want to return.
     template (str)
@@ -141,14 +174,12 @@ def defineParams(paramFile=None):
 
 def setupCampaign(params, output_columns, template):
     """
-    Builds a campaign according to the parameters provided.
+    Builds a campaign using the parameters provided.
 
     Parameters
     ----------
     params (dict)
         Dictionary of parameters, their default values and their range of uncertainty.
-    input_folder (str)
-        Name of folder to contain the blob2d input file.
     output_columns (list)
         List of the quantities we want the decoder to pass out.
     template (str)
@@ -156,7 +187,7 @@ def setupCampaign(params, output_columns, template):
 
     Returns
     -------
-    campaign (easyvvuq campaign)
+    campaign (easyvvuq campaign object)
         The campaign, build accoring to the provided parameters.
     """
     
