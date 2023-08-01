@@ -1,30 +1,6 @@
 """
-Place in folder with blob2d, b2d.template, a folder called blobDir and possibly a decoder
-Running will run the SC campaign on blob2d as defined below
+Runs a dimension adaptive stochastic colocation UQ campaign on the blob2d model
 """
-    """
-    Returns the flux surface corresponding to a set of miller parameters.
-
-    Parameters
-    ----------
-    A
-        Aspect ratio
-    kappa
-        Elongation
-    delta
-        Triangularity
-    R0
-        Major radius
-    Theta
-        Poloidal angle
-
-    Returns
-   -------
-    R_s
-        Set of major radii
-    R_z
-        Set of vertical coordinates
-    """
 
 import easyvvuq as uq
 import numpy as np
@@ -33,18 +9,13 @@ import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, CleanUp, ExecuteLocal, Actions
 
-from string import Template
-import logging#???????????????????????????????????????????????????????????????????????????????????
-
 class b2dEncoder:
-    """Encoder for blob2d.
+    """
+    Encoder for blob2d, just generic decoder with extra line to create the b2d input folder.
 
     Parameters
     ----------
-
-    Attributes
-    ----------
-
+    Note targetfile/folder thing
     """
 
     def __init__(self, template_fname, delimiter='$', target_filename="app_input.txt"):
@@ -53,7 +24,8 @@ class b2dEncoder:
         self.template_fname = template_fname
 
     def encode(self, params={}, target_dir=''):
-        """Substitutes `params` into a template application input, saves in
+        """
+        Substitutes `params` into a template application input, saves in
         `target_dir`
 
         Parameters
@@ -63,7 +35,8 @@ class b2dEncoder:
         target_dir    : str
             Path to directory where application input will be written.
         """
-
+        
+        from string import Template
         try:
             with open(self.template_fname, 'r') as template_file:
                 template_txt = template_file.read()
@@ -91,11 +64,11 @@ class b2dEncoder:
             fp.write(app_input_txt)
 
     def _log_substitution_failure(self, exception):
+        import logging
         reasoning = (f"\nFailed substituting into template "
                      f"{self.template_fname}.\n"
                      f"KeyError: {str(exception)}.\n")
         logging.error(reasoning)
-
         raise KeyError(reasoning)
 
 class b2dDecoder:
@@ -123,17 +96,19 @@ class b2dDecoder:
         self.output_type = OutputType('sample')
     
     def getBlobVelocity(self, out_path):
-        import numpy as np
         from xbout import open_boutdataset
         
-        os.chdir(out_path)#################################### Need to unset this later or not?
+        # Set working directory to location of b2d output files
+        os.chdir(out_path)
         
+        # Unpack data from blob2d
         ds = open_boutdataset(chunks={"t": 4})
         ds = ds.squeeze(drop=True)
         dx = ds["dx"].isel(x=0).values
         ds = ds.drop("x")
         ds = ds.assign_coords(x=np.arange(ds.sizes["x"])*dx)
         
+        # Obtain blob velocity from data
         background_density = 1.0
         ds["delta_n"] = ds["n"] - background_density
         integrated_density = ds.bout.integrate_midpoints("delta_n")
@@ -164,6 +139,7 @@ def refine_sampling_plan(number_of_refinements):
         None. The new accepted indices are stored in analysis.l_norm and the admissible indices
         in sampler.admissible_idx.
         """
+        
         for i in range(number_of_refinements):
             # compute the admissible indices
             sampler.look_ahead(analysis.l_norm)
@@ -178,39 +154,40 @@ def refine_sampling_plan(number_of_refinements):
             
 ###############################################################################
 
-def defineParams():
-    # Define parameters & whoch are uncertain
-    vary = {
-            "height": cp.Normal(0.5, 0.1),
-            "width": cp.Normal(0.09, 0.02)# Different distribution?
-    }
-    params = {
-            "Te0": {"type": "float", "default": 5.0},
-            "n0": {"type": "float", "default": 2.0e+18},
-            "D_vort": {"type": "float", "default": 1.0e-6},
-            "D_n": {"type": "float", "default": 1.0e-6},
-            "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
-            "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
-            
-            "outfolder": {"type": "string", "default": "blobDir/"},
-            "d": {"type": "integer", "default": len(vary)}
-    }
+def defineParams(paramFile=None):
+    if paramFile == None:
+        params = {
+                "Te0": {"type": "float", "default": 5.0},
+                "n0": {"type": "float", "default": 2.0e+18},
+                "D_vort": {"type": "float", "default": 1.0e-6},
+                "D_n": {"type": "float", "default": 1.0e-6},
+                "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
+                "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
+        }
+        vary = {
+                "height": cp.Normal(0.5, 0.1),
+                "width": cp.Normal(0.09, 0.02)# Different distribution?
+        }
+        
+        output_folder = "blobDir/"# Arbitrary but must be defined (location of BOUT.inp & output files)
+        output_columns = ["maxV"]
+        template = 'b2d.template'
+        
+        return params, vary, output_folder, output_columns, template
+    else:
+        # Don't plan to use parameter files but will write in code to do so if time
+        pass
+        #return params, vary, output_folder, output_columns, template
 
-    # Note output filename and output value name
-    output_folder = params["outfolder"]["default"]
-    output_columns = ["maxV"]
-    
-    return output_folder, output_columns
-
-def setupCampaign(output_folder, output_columns):
+def setupCampaign(params, output_folder, output_columns, template):
     # Create & package encoder, decoder & executor into actions
     
     encoder = b2dEncoder(
-            template_fname='b2d.template',
+            template_fname=template,
             delimiter='$',
-            target_filename='blobDir/BOUT.inp')
+            target_filename='{}BOUT.inp'.format(output_folder))
     
-    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -d blobDir nout=6'.format(os.getcwd()))# 60+ timesteps resonable
+    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d {} nout=6'.format(os.getcwd(), output_folder))# 60+ timesteps resonable
     
     decoder = b2dDecoder(
             target_filename=output_folder,# must use "target_filename" even though a folder for compatibility with executor
@@ -222,7 +199,21 @@ def setupCampaign(output_folder, output_columns):
     
     return campaign
 
-def setupSampler():
+def setupSampler(vary):
+    """
+    Creates and returns an easyvvuq sampler object according to the uncertain parameters
+
+    Parameters
+    ----------
+    vary
+        Dictionary of uncertain parameters (subset of params)
+
+    Returns
+    -------
+    sampler
+        Easyvvuq sampler object for an easyvvuq campaign
+    """
+    
     sampler = uq.sampling.SCSampler(
             vary=vary,
             polynomial_order=1,
@@ -242,9 +233,9 @@ def runCampaign(campaign, sampler):
 ###############################################################################
 
 def main():
-    output_folder, output_columns = defineParams()
-    campaign = setupCampaign(output_folder, output_columns)
-    sampler = setupSampler()
+    params, vary, output_folder, output_columns, template = defineParams()
+    campaign = setupCampaign(params, output_folder, output_columns, template)
+    sampler = setupSampler(vary)
     runCampaign(campaign, sampler)
 
 if __name__ == "__main__":
