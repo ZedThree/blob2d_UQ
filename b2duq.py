@@ -2,7 +2,7 @@
 Runs a dimension adaptive stochastic colocation UQ campaign on the blob2d model
 Should be run with python3 in the same folder as blob2d and a blob2d input template.
 
-Dependencies: easyvvuq-1.2, matplotlib-3.7.2 & xbout-0.3.5.
+Dependencies: easyvvuq-1.2 & xbout-0.3.5.
 """
 
 import easyvvuq as uq
@@ -107,7 +107,7 @@ class b2dDecoder:
 
 ###############################################################################
 
-def refine_sampling_plan(number_of_refinements):
+def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
     """
     Refine the sampling plan.
 
@@ -250,11 +250,31 @@ def setupSampler(vary):
 
 def runCampaign(campaign, sampler):
     """
-    Runs a campaign using provided sampler.
+    Runs a campaign using provided sampler and conducts analysis.
     """
     
+    # Run campaign
     campaign.set_sampler(sampler)
     campaign.execute().collate(progress_bar=True)
+
+def analyseCampaign(campaign, sampler, output_columns):
+    """
+    Runs #################################################################################
+    """
+    # Analyse campaign
+    campaign.get_collation_result()
+    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    campaign.apply_analysis(analysis)
+    print(analysis.l_norm)
+    
+    # Refine analysis
+    #refine_sampling_plan(3, campaign, sampler, analysis)
+    #campaign.apply_analysis(analysis)
+    
+    # Plot Analysis
+    #analysis.adaptation_table()
+    #analysis.adaptation_histogram()
+    #analysis.get_adaptation_errors()
 
 ###############################################################################
 
@@ -271,7 +291,10 @@ def main():
     # Run the campaign
     runCampaign(campaign, sampler)
     
-    print("Campaign run & collated successfuly")
+    # Analyse campaign
+    analyseCampaign(campaign, sampler, output_columns)
+    
+    print("Campaign run & analysed successfuly")
 
 if __name__ == "__main__":
     main()
