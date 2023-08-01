@@ -57,7 +57,8 @@ class b2dDecoder:
         ds = ds.drop("x")
         ds = ds.assign_coords(x=np.arange(ds.sizes["x"])*dx)
         
-        # Obtain blob velocity from data
+        # Obtain blob info from data
+        blobInfo = {}
         background_density = 1.0
         ds["delta_n"] = ds["n"] - background_density
         integrated_density = ds.bout.integrate_midpoints("delta_n")
@@ -65,7 +66,10 @@ class b2dDecoder:
         ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
         v_x = ds["CoM_x"].differentiate("t")
         
-        blobInfo = {"maxV": [float(max(v_x))]}# Add other velocity / distance metrics?
+        # Save useful quantities to dictionary (add more?)
+        maxV = float(max(v_x))
+        maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
+        blobInfo = {"maxV": maxV, "maxX": maxX}
     
         return blobInfo
     
@@ -144,6 +148,9 @@ def defineParams(paramFile=None):
         Dictionary of uncertain parameters and their distributions.
     output_columns (list)
         List of the quantities extracted by the decoder we want to return.
+        Options:
+            maxV: the maximum major radial CoM velocity achieved by the blob
+            maxX: the distance the blob propagates before disintegration
     template (str)
         Filename of the template to be used.
     """
@@ -161,7 +168,7 @@ def defineParams(paramFile=None):
                 "height": cp.Normal(0.5, 0.1),
                 "width": cp.Normal(0.09, 0.02)# Try different distribution?
         }
-
+        
         output_columns = ["maxV"]
         template = 'b2d.template'
         
@@ -197,8 +204,8 @@ def setupCampaign(params, output_columns, template):
             delimiter='$',
             target_filename='BOUT.inp')
     
-    # Create executor
-    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))# 60+ timesteps resonable (higher np?)
+    # Create executor - 60+ timesteps should be resonable (higher np?)
+    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))
     
     # Create decoder
     decoder = b2dDecoder(
