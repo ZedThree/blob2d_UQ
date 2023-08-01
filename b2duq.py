@@ -96,16 +96,11 @@ class b2dDecoder:
     
     def __init__(self, target_filename, output_columns):
         # target_filename is a folder, but can't change variable name for compatibility with easyvvuq
-        
-        if len(output_columns) == 0:
-            msg = "output_columns cannot be empty."
-            logger.error(msg)
-            raise RuntimeError(msg)
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
     
-    def getBlobVelocity(self, out_path):
+    def getBlobVelocity(self, out_path):################################Other options
         
         # Set working directory to location of b2d output files
         os.chdir(out_path)
@@ -181,7 +176,7 @@ def defineParams(paramFile=None):
     input_folder (str)
         Name of folder to contain the blob2d input file, this is arbitrary but must be defined.
     output_columns (list)
-        List of the quantities we want the decoder to pass out.
+        List of the quantities extracted by the decoder we want to return.
     template (str)
         Filename of the template to be used.
     """
@@ -200,7 +195,7 @@ def defineParams(paramFile=None):
                 "width": cp.Normal(0.09, 0.02)# Try different distribution?
         }
 
-        input_folder = "blobDir/"# Arbitrary but must be defined (location of BOUT.inp & output files)
+        input_folder = "blobDir/"
         output_columns = ["maxV"]
         template = 'b2d.template'
         
@@ -244,7 +239,7 @@ def setupCampaign(params, input_folder, output_columns, template):
     # Create decoder
     decoder = b2dDecoder(
             target_filename=input_folder,# Must use "target_filename" even though a folder for compatibility with executor
-            output_columns=output_columns)###
+            output_columns=output_columns)
     
     # Pack up encoder, decoder and executor
     actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))

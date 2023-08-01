@@ -14,71 +14,6 @@ import logging
 from easyvvuq import OutputType
 from xbout import open_boutdataset
 
-class b2dEncoder:
-    """
-    Encoder for blob2d, just GenericEecoder modified to handle a folder containing the input file.
-    
-    Parameters
-    ----------
-    template_fname (str)
-        Input template filename.
-    delimiter='$' (char)
-        Symbol used in the template to denote where values should be substituted in.
-    target_filename (str)
-        The name of the template after it has been filled in.  This should include the
-        parent directory too as blob2d is passed a directory containing the input file.
-    """
-    
-    def __init__(self, template_fname, delimiter='$', target_filename="blobDir/BOUT.inp"):
-        self.delimiter = delimiter
-        self.target_filename = target_filename
-        self.template_fname = template_fname
-
-    def encode(self, params={}, target_dir=''):
-        """
-        Substitutes `params` into a template blob2d input and saves in `target_dir/<input_folder>`
-
-        Parameters
-        ----------
-        params (dict)
-            Dictionary of system parameters
-        target_dir (str)
-            Path to directory that will contain b2d input folder.
-        """
-        
-        try:
-            with open(self.template_fname, 'r') as template_file:
-                template_txt = template_file.read()
-                self.template = Template(template_txt)
-        except FileNotFoundError:
-            raise RuntimeError(
-                "the template file specified ({}) does not exist".format(self.template_fname))
-
-        if not target_dir:
-            raise RuntimeError('No target directory specified to encoder')
-
-        str_params = {}
-        for key, value in params.items():
-            str_params[key] = str(value)
-
-        try:
-            app_input_txt = self.template.substitute(str_params)
-        except KeyError as e:
-            self._log_substitution_failure(e)
-
-        # Write target input file
-        target_file_path = os.path.join(target_dir, self.target_filename)
-        os.mkdir(os.path.join(target_dir, os.path.dirname(self.target_filename)))# Need to create parent directory of input file
-        with open(target_file_path, 'w') as fp:
-            fp.write(app_input_txt)
-
-    def _log_substitution_failure(self, exception):
-        reasoning = (f"\nFailed substituting into template "
-                     f"{self.template_fname}.\n"
-                     f"KeyError: {str(exception)}.\n")
-        logging.error(reasoning)
-        raise KeyError(reasoning)
-
 class b2dDecoder:
     """
     Custom decoder for blob2d output.
@@ -89,23 +24,17 @@ class b2dDecoder:
         Filename to decode.
     ouput_columns (list)
         A list of column names that will be selected to appear in the output.
-    We have changed this
+        We have changed this
         to be a folder instead of a file but the variable name is unchanged so the
         encoder is compatible with the execute module
     """
     
     def __init__(self, target_filename, output_columns):
-        # target_filename is a folder, but can't change variable name for compatibility with easyvvuq
-        
-        if len(output_columns) == 0:
-            msg = "output_columns cannot be empty."
-            logger.error(msg)
-            raise RuntimeError(msg)
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
     
-    def getBlobVelocity(self, out_path):
+    def getBlobVelocity(self, out_path):################################Other options
         
         # Set working directory to location of b2d output files
         os.chdir(out_path)
@@ -181,7 +110,7 @@ def defineParams(paramFile=None):
     input_folder (str)
         Name of folder to contain the blob2d input file, this is arbitrary but must be defined.
     output_columns (list)
-        List of the quantities we want the decoder to pass out.
+        List of the quantities extracted by the decoder we want to return.
     template (str)
         Filename of the template to be used.
     """
@@ -200,18 +129,17 @@ def defineParams(paramFile=None):
                 "width": cp.Normal(0.09, 0.02)# Try different distribution?
         }
 
-        input_folder = "blobDir/"# Arbitrary but must be defined (location of BOUT.inp & output files)
         output_columns = ["maxV"]
         template = 'b2d.template'
         
-        return params, vary, input_folder, output_columns, template
+        return params, vary, output_columns, template
     
     else:
         # Don't plan to use parameter files but will write in code to do so if needed
         pass
-        #return params, vary, input_folder, output_columns, template
+        #return params, vary, output_columns, template
 
-def setupCampaign(params, input_folder, output_columns, template):
+def setupCampaign(params, output_columns, template):
     """
     Builds a campaign according to the parameters provided.
 
@@ -233,17 +161,17 @@ def setupCampaign(params, input_folder, output_columns, template):
     """
     
     # Create encoder
-    encoder = b2dEncoder(
+    encoder = uq.encoders.GenericEncoder(
             template_fname=template,
             delimiter='$',
-            target_filename='{}BOUT.inp'.format(input_folder))
+            target_filename='BOUT.inp')
     
     # Create executor
-    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d {} nout=6'.format(os.getcwd(), input_folder))# 60+ timesteps resonable
+    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))# 60+ timesteps resonable (higher np?)
     
     # Create decoder
     decoder = b2dDecoder(
-            target_filename=input_folder,# Must use "target_filename" even though a folder for compatibility with executor
+            target_filename="./",
             output_columns=output_columns)
     
     # Pack up encoder, decoder and executor
@@ -282,10 +210,10 @@ def runCampaign(campaign, sampler):
 
 def main():
     # Get campaign parameters
-    params, vary, input_folder, output_columns, template = defineParams()
+    params, vary, output_columns, template = defineParams()
     
     # Build campaign
-    campaign = setupCampaign(params, input_folder, output_columns, template)
+    campaign = setupCampaign(params, output_columns, template)
     
     # Set up sampler
     sampler = setupSampler(vary)
