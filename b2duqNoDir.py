@@ -244,7 +244,7 @@ def setupCampaign(params, input_folder, output_columns, template):
     # Create decoder
     decoder = b2dDecoder(
             target_filename=input_folder,# Must use "target_filename" even though a folder for compatibility with executor
-            output_columns=output_columns)###
+            output_columns=output_columns)
     
     # Pack up encoder, decoder and executor
     actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
