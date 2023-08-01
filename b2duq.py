@@ -185,8 +185,11 @@ def defineParams(paramFile=None):
     
     else:
         # Don't plan to use parameter files but will write in code to do so if needed
-        pass
+        #pFile = load(paramFile)
+        #params = pFile[0]
+        #...
         #return params, vary, output_columns, template
+        pass
 
 def setupCampaign(params, output_columns, template):
     """
