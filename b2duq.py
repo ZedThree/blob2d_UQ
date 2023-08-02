@@ -172,11 +172,11 @@ def defineParams(paramFile=None):
         }
         
         output_columns = ["maxV"]
-        template = 'b2d.template'
-        
         # Show user available and selected output options
         b2dDecoder.showOutOptions()
         print("Options selected: ", output_columns, "\n")
+        
+        template = 'b2d.template'
         
         return params, vary, output_columns, template
     
@@ -259,7 +259,7 @@ def analyseCampaign(campaign, sampler, output_columns):
     Runs ###################################################################################################
     """
     # Analyse campaign
-    campaign.get_collation_result()
+    dParams = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
@@ -269,14 +269,18 @@ def analyseCampaign(campaign, sampler, output_columns):
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
+    # Print mean and variation of quantity
+    #dParams = campaign.get_collation_result()##########################################################
+    results = analysis.analyse(dParams)
+    print('Mean = %.4e' % results.describe('maxV', 'mean'))
+    print('Standard deviation = %.4e' % results.describe('maxV', 'std'))
+    
     # Plot Analysis
     analysis.adaptation_table()
     analysis.adaptation_histogram()
     analysis.get_adaptation_errors()
     
     # Get Sobol indices
-    df = campaign.get_collation_result()
-    results = analysis.analyse(df)
     params = list(sampler.vary.get_keys())
     sobols = []
     for param in params:
@@ -290,6 +294,7 @@ def analyseCampaign(campaign, sampler, output_columns):
     ax.set_xticklabels(params)
     plt.xticks(rotation=90)
     plt.tight_layout()
+    plt.savefig("SobolsByRefinement.png")
     plt.show()
 
 ###############################################################################
