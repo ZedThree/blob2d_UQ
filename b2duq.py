@@ -47,11 +47,10 @@ class b2dDecoder:
             Dictionary of quantities which may be called by the campaign.
         """
         
-        # Set working directory to location of b2d output files
-        os.chdir(out_path)
+        print(out_path, "########################################")
         
         # Unpack data from blob2d
-        ds = open_boutdataset(chunks={"t": 4})
+        ds = open_boutdataset(out_path, chunks={"t": 4})
         ds = ds.squeeze(drop=True)
         dx = ds["dx"].isel(x=0).values
         ds = ds.drop("x")
@@ -70,7 +69,7 @@ class b2dDecoder:
         maxV = float(max(v_x))
         maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
         blobInfo = {"maxV": maxV, "maxX": maxX}
-    
+        
         return blobInfo
     
     def showOutOptions():
@@ -170,8 +169,8 @@ def defineParams(paramFile=None):
                 "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
         }
         vary = {
-                "height": cp.Normal(0.5, 0.1),
-                "width": cp.Normal(0.09, 0.02)# Try different distribution?
+                "height": cp.Uniform(0.25, 0.75),
+                "width": cp.Uniform(0.03, 0.15)# Try different distribution?
         }
         
         output_columns = ["maxV"]
@@ -217,11 +216,11 @@ def setupCampaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal('mpirun -np 4 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))
+    execute = ExecuteLocal('mpirun -np 16 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))
     
     # Create decoder
     decoder = b2dDecoder(
-            target_filename="./",
+            target_filename="BOUT.dmp.*.nc",
             output_columns=output_columns)
     
     # Pack up encoder, decoder and executor
@@ -268,8 +267,9 @@ def analyseCampaign(campaign, sampler, output_columns):
     print(analysis.l_norm)
     
     # Refine analysis
-    #refine_sampling_plan(3, campaign, sampler, analysis)
+    #refine_sampling_plan(1, campaign, sampler, analysis)
     #campaign.apply_analysis(analysis)
+    #   print(analysis.l_norm)
     
     # Plot Analysis
     #analysis.adaptation_table()
