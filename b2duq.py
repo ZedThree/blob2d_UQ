@@ -47,8 +47,6 @@ class b2dDecoder:
             Dictionary of quantities which may be called by the campaign.
         """
         
-        print(out_path, "########################################")
-        
         # Unpack data from blob2d
         ds = open_boutdataset(out_path, chunks={"t": 4})
         ds = ds.squeeze(drop=True)
@@ -130,8 +128,8 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
 
         # accept one of the multi indices of the new admissible set
         data_frame = campaign.get_collation_result()
-        analysis.adapt_dimension('f', data_frame)
-        #analysis.adapt_dimension('f', data_frame, method='var')
+        analysis.adapt_dimension('maxV', data_frame)
+        #analysis.adapt_dimension('maxV', data_frame, method='var')
             
 ###############################################################################
 
@@ -216,7 +214,7 @@ def setupCampaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal('mpirun -np 16 {}/blob2d -q -d ./ nout=6'.format(os.getcwd()))
+    execute = ExecuteLocal('mpirun -np 16 {}/blob2d -d ./ nout=6'.format(os.getcwd()))
     
     # Create decoder
     decoder = b2dDecoder(
@@ -258,7 +256,7 @@ def runCampaign(campaign, sampler):
 
 def analyseCampaign(campaign, sampler, output_columns):
     """
-    Runs #################################################################################
+    Runs ###################################################################################################
     """
     # Analyse campaign
     campaign.get_collation_result()
@@ -267,14 +265,32 @@ def analyseCampaign(campaign, sampler, output_columns):
     print(analysis.l_norm)
     
     # Refine analysis
-    #refine_sampling_plan(1, campaign, sampler, analysis)
-    #campaign.apply_analysis(analysis)
-    #   print(analysis.l_norm)
+    refine_sampling_plan(3, campaign, sampler, analysis)
+    campaign.apply_analysis(analysis)
+    print(analysis.l_norm)
     
     # Plot Analysis
-    #analysis.adaptation_table()
-    #analysis.adaptation_histogram()
-    #analysis.get_adaptation_errors()
+    analysis.adaptation_table()
+    analysis.adaptation_histogram()
+    analysis.get_adaptation_errors()
+    
+    # Get Sobol indices
+    df = campaign.get_collation_result()
+    results = analysis.analyse(df)
+    params = list(sampler.vary.get_keys())
+    sobols = []
+    for param in params:
+        sobols.append(results._get_sobols_first('maxV', param))
+        
+    # Plot sobol indices
+    fig = plt.figure()
+    ax = fig.add_subplot(111, title='First-order Sobol indices')
+    ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
+    ax.set_xticks(range(len(sobols)))
+    ax.set_xticklabels(params)
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.show()
 
 ###############################################################################
 
