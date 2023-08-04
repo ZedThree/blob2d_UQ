@@ -48,7 +48,8 @@ class b2dDecoder:
         """
         
         # Unpack data from blob2d
-        ds = open_boutdataset(out_path, chunks={"t": 4})
+        #ds = open_boutdataset(out_path, chunks={"t": 8})
+        ds = open_boutdataset(out_path, info=False)
         ds = ds.squeeze(drop=True)
         dx = ds["dx"].isel(x=0).values
         ds = ds.drop("x")
@@ -214,7 +215,7 @@ def setupCampaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal('mpirun -np 16 {}/blob2d -d ./ nout=6'.format(os.getcwd()))
+    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=60 -q -q -q ')
     
     # Create decoder
     decoder = b2dDecoder(
@@ -265,26 +266,25 @@ def analyseCampaign(campaign, sampler, output_columns):
     print(analysis.l_norm)
     
     # Refine analysis
-    refine_sampling_plan(3, campaign, sampler, analysis)
+    refine_sampling_plan(6, campaign, sampler, analysis)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
     # Print mean and variation of quantity
     #dParams = campaign.get_collation_result()##########################################################
     results = analysis.analyse(dParams)
-    print('Mean = %.4e' % results.describe('maxV', 'mean'))
-    print('Standard deviation = %.4e' % results.describe('maxV', 'std'))
+    print(f'Mean = {results.describe("maxV", "mean")}')
+    print(f'Standard deviation = {results.describe("maxV", "std")}')
     
     # Plot Analysis
-    analysis.adaptation_table()
-    analysis.adaptation_histogram()
+    #analysis.adaptation_table()
+    #analysis.adaptation_histogram()
     analysis.get_adaptation_errors()
     
     # Get Sobol indices
-    params = list(sampler.vary.get_keys())
-    sobols = []
-    for param in params:
-        sobols.append(results._get_sobols_first('maxV', param))
+    #params = list(sampler.vary.get_keys())
+    sobols = [results._get_sobols_first('maxV', param) for param in sampler.vary.get_keys()]
+    #    sobols.append(results._get_sobols_first('maxV', param))
         
     # Plot sobol indices
     fig = plt.figure()
@@ -300,19 +300,10 @@ def analyseCampaign(campaign, sampler, output_columns):
 ###############################################################################
 
 def main():
-    # Get campaign parameters
     params, vary, output_columns, template = defineParams()
-    
-    # Build campaign
     campaign = setupCampaign(params, output_columns, template)
-    
-    # Set up sampler
     sampler = setupSampler(vary)
-    
-    # Run the campaign
     runCampaign(campaign, sampler)
-    
-    # Analyse campaign
     analyseCampaign(campaign, sampler, output_columns)
     
     print("Campaign run & analysed successfuly")
