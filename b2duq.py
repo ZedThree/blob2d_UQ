@@ -27,7 +27,7 @@ class B2dDecoder:
         List of output quantities to considered by the campaign
     """
     
-    def __init__(self, target_filename, output_columns):
+    def __init__(self, target_filename, output_columns, grid_mismatch=False):
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
@@ -214,18 +214,19 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=4 -q -q -q ')
+    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
             target_filename="BOUT.dmp.*.nc",
             output_columns=output_columns)
     
-    # Pack up encoder, decoder and executor
-    actions = Actions(CreateRunDirectory('/tmp'), Encode(encoder), execute, Decode(decoder))
+    # Ensure run directory exists, then pack up encoder, decoder and executor
+    if os.path.exists('outfiles')==0: os.mkdir('outfiles')
+    actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     
     # Build campaign
-    campaign = uq.Campaign(name='sc_adaptive', work_dir='/tmp', params=params, actions=actions)
+    campaign = uq.Campaign(name='sc_adaptive', work_dir='outfiles', params=params, actions=actions)
     
     return campaign
 
@@ -279,7 +280,7 @@ def analyse_campaign(campaign, sampler, output_columns):
     print(analysis.l_norm)
     
     # Refine analysis
-    refine_sampling_plan(3, campaign, sampler, analysis)
+    refine_sampling_plan(2, campaign, sampler, analysis)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
