@@ -15,7 +15,7 @@ from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, A
 from easyvvuq import OutputType
 from xbout import open_boutdataset
 
-class b2dDecoder:
+class B2dDecoder:
     """
     Custom decoder for blob2d output.
 
@@ -32,7 +32,7 @@ class b2dDecoder:
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
     
-    def getBlobInfo(self, out_path):    
+    def get_blob_info(self, out_path):    
         """
         Uses xbout to extract the data from blob2d output files and convert to useful quantities.
         
@@ -48,7 +48,6 @@ class b2dDecoder:
         """
         
         # Unpack data from blob2d
-        #ds = open_boutdataset(out_path, chunks={"t": 8})
         ds = open_boutdataset(out_path, info=False)
         ds = ds.squeeze(drop=True)
         dx = ds["dx"].isel(x=0).values
@@ -71,7 +70,7 @@ class b2dDecoder:
         
         return blobInfo
     
-    def showOutOptions():
+    def show_out_options():
         print("""Possible outputs:
             maxV: the maximum major radial CoM velocity achieved by the blob
             maxX: the distance the blob propagates before disintegration""")
@@ -100,7 +99,7 @@ class b2dDecoder:
         """
         
         out_path = os.path.join(run_info['run_dir'], self.target_filename)
-        outQtts = self.getBlobInfo(out_path)
+        outQtts = self.get_blob_info(out_path)
         return outQtts
 
 ###############################################################################
@@ -134,7 +133,7 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
             
 ###############################################################################
 
-def defineParams(paramFile=None):
+def define_params(paramFile=None):
     """
     Defines parameters to be applied to the system.
 
@@ -174,7 +173,7 @@ def defineParams(paramFile=None):
         
         output_columns = ["maxV"]
         # Show user available and selected output options
-        b2dDecoder.showOutOptions()
+        B2dDecoder.show_out_options()
         print("Options selected: ", output_columns, "\n")
         
         template = 'b2d.template'
@@ -189,7 +188,7 @@ def defineParams(paramFile=None):
         #return params, vary, output_columns, template
         pass
 
-def setupCampaign(params, output_columns, template):
+def setup_campaign(params, output_columns, template):
     """
     Builds a campaign using the parameters provided.
 
@@ -215,10 +214,10 @@ def setupCampaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=60 -q -q -q ')
+    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=4 -q -q -q ')
     
     # Create decoder
-    decoder = b2dDecoder(
+    decoder = B2dDecoder(
             target_filename="BOUT.dmp.*.nc",
             output_columns=output_columns)
     
@@ -230,7 +229,7 @@ def setupCampaign(params, output_columns, template):
     
     return campaign
 
-def setupSampler(vary):
+def setup_sampler(vary):
     """
     Creates and returns an easyvvuq sampler object with the uncertain parameters from vary.
     """
@@ -246,27 +245,41 @@ def setupSampler(vary):
     
     return sampler
 
-def runCampaign(campaign, sampler):
+def run_campaign(campaign, sampler):
     """
-    Runs a campaign using provided sampler and conducts analysis.
+    Runs a campaign using provided sampler.
     """
     
-    # Run campaign
     campaign.set_sampler(sampler)
     campaign.execute().collate(progress_bar=True)
 
-def analyseCampaign(campaign, sampler, output_columns):
+def analyse_campaign(campaign, sampler, output_columns):
     """
-    Runs ###################################################################################################
+    Runs a set of analyses on a provided campaign, details often change by commit.
+    
+    Parameters
+    ----------
+    campaign (easyvvuq Campaign object)
+        The campaign being analysed
+    sampler (easyvvuq SCSampler object)
+        The sampler being used
+    output_columns (dict)
+        List of output quantities under consideration
+
+    Returns
+    -------
+    None - results either printed to screen, plotted or saved to a file.
     """
-    # Analyse campaign
+    # Create analysis class
     dParams = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    
+    # Run analysis
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
     # Refine analysis
-    refine_sampling_plan(6, campaign, sampler, analysis)
+    refine_sampling_plan(3, campaign, sampler, analysis)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
@@ -281,10 +294,9 @@ def analyseCampaign(campaign, sampler, output_columns):
     #analysis.adaptation_histogram()
     analysis.get_adaptation_errors()
     
-    # Get Sobol indices
-    #params = list(sampler.vary.get_keys())
-    sobols = [results._get_sobols_first('maxV', param) for param in sampler.vary.get_keys()]
-    #    sobols.append(results._get_sobols_first('maxV', param))
+    # Get Sobol indices (online foor loop automatically creates a list without having to append)
+    params = sampler.vary.get_keys()# This is used later too
+    sobols = [results._get_sobols_first('maxV', param) for param in params]
         
     # Plot sobol indices
     fig = plt.figure()
@@ -294,17 +306,17 @@ def analyseCampaign(campaign, sampler, output_columns):
     ax.set_xticklabels(params)
     plt.xticks(rotation=90)
     plt.tight_layout()
-    plt.savefig("SobolsByRefinement.png")
+    plt.savefig("Sobols.png")
     plt.show()
 
 ###############################################################################
 
 def main():
-    params, vary, output_columns, template = defineParams()
-    campaign = setupCampaign(params, output_columns, template)
-    sampler = setupSampler(vary)
-    runCampaign(campaign, sampler)
-    analyseCampaign(campaign, sampler, output_columns)
+    params, vary, output_columns, template = define_params()
+    campaign = setup_campaign(params, output_columns, template)
+    sampler = setup_sampler(vary)
+    run_campaign(campaign, sampler)
+    analyse_campaign(campaign, sampler, output_columns)
     
     print("Campaign run & analysed successfuly")
 
