@@ -11,6 +11,7 @@ import chaospy as cp
 import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
+import pickle
 
 from easyvvuq import OutputType
 from xbout import open_boutdataset
@@ -27,7 +28,100 @@ class B2dDecoder:
         List of output quantities to considered by the campaign
     """
     
-    def __init__(self, target_filename, output_columns, grid_mismatch=False):
+    def __init__(self, target_filename, output_columns):
+        self.target_filename = target_filename
+        self.output_columns = output_columns
+        self.output_type = OutputType('sample')
+    
+    def get_blob_info(self, out_path):    
+        """
+        Uses xbout to extract the data from blob2d output files and convert to useful quantities.
+        
+        Parameters
+        ----------
+        out_path (str)
+            Absolute path to the blob2d output files.
+
+        Returns
+        -------
+        blobInfo (dict)
+            Dictionary of quantities which may be called by the campaign.
+        """
+        
+        # Unpack data from blob2d
+        ds = open_boutdataset(out_path, info=False)
+        ds = ds.squeeze(drop=True)
+        dx = ds["dx"].isel(x=0).values
+        ds = ds.drop("x")
+        ds = ds.assign_coords(x=np.arange(ds.sizes["x"])*dx)
+        
+        # Obtain blob info from data
+        blobInfo = {}
+        background_density = 1.0
+        ds["delta_n"] = ds["n"] - background_density
+        integrated_density = ds.bout.integrate_midpoints("delta_n")
+        ds["delta_n*x"] = ds["delta_n"] * ds["x"]
+        ds["transpRate"] = ds.bout.integrate_midpoints("delta_n*x")
+        ds["CoM_x"] = ds["transpRate"] / integrated_density
+        v_x = ds["CoM_x"].differentiate("t")
+        
+        # Save useful quantities to dictionary
+        maxV = float(max(v_x))
+        maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
+        avgTransp = float(np.mean(ds["transpRate"][:(list(v_x).index(max(v_x)))+1]))
+        massLoss = integrated_density[list(v_x).index(max(v_x))] / integrated_density[0]
+        
+        blobInfo = {"maxV": maxV, "maxX": maxX, "transpRate": transpRate, "massLoss": massLoss}
+        
+        return blobInfo
+    
+    def show_out_options():
+        print("""Possible outputs:
+            maxV: the maximum major radial CoM velocity achieved by the blob
+            maxX: the distance the blob propagates before disintegration
+            avgTransp: the average rate of transport of the blob (i.e. flux) over its lifetime
+            massLoss: the ratio of blob mass at disintegration to initial blob mass""")
+    
+    def parse_sim_output(self, run_info={}):
+        """
+        Parses a BOUT.dmp.*.nc file from the output of blob2d and converts it to the EasyVVUQ
+        internal dictionary based format.  The file is parsed in such a way that each column
+        appears as a vector QoI in the output dictionary.
+
+        E.g. if the file contains the LHS and `a` & `b` are specified as `output_columns` then:
+        a,b
+        1,2  >>>  {'a': [1, 3], 'b': [2, 4]}.
+        3,4
+
+        Parameters
+        ----------
+        run_info: dict
+            Information about the run used to construct the absolute path to
+            the blob2d output files.
+        
+        Returns
+        -------
+        outQtts (dict)
+            Dictionary of quantities which may be of interest
+        """
+        
+        out_path = os.path.join(run_info['run_dir'], self.target_filename)
+        outQtts = self.get_blob_info(out_path)
+        return outQtts
+
+class B2dDecoder2:
+    """
+    Custom decoder for blob2d output.
+
+    Parameters
+    ----------
+    target_filename (str)
+        Name of blob2d output file to be decoded.
+    ouput_columns (list)
+        List of output quantities to considered by the campaign
+    """
+    
+    def __init__(self, target_filename, output_columns):
         self.target_filename = target_filename
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
@@ -125,7 +219,7 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
         
         # run the ensemble
         campaign.execute().collate(progress_bar=True)
-
+        
         # accept one of the multi indices of the new admissible set
         data_frame = campaign.get_collation_result()
         analysis.adapt_dimension('maxV', data_frame)
@@ -221,11 +315,9 @@ def setup_campaign(params, output_columns, template):
             target_filename="BOUT.dmp.*.nc",
             output_columns=output_columns)
     
-    # Ensure run directory exists, then pack up encoder, decoder and executor
+    # Ensure run directory exists, then pack up encoder, decoder, executor and build campaign
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
-    
-    # Build campaign
     campaign = uq.Campaign(name='sc_adaptive', work_dir='outfiles', params=params, actions=actions)
     
     return campaign
@@ -242,7 +334,7 @@ def setup_sampler(vary):
             sparse=True,
             growth=True,
             midpoint_level1=True,
-            dimension_adaptive=True) 
+            dimension_adaptive=True)
     
     return sampler
 
@@ -283,6 +375,8 @@ def analyse_campaign(campaign, sampler, output_columns):
     refine_sampling_plan(2, campaign, sampler, analysis)
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
+    
+    # Save analysis class
     
     # Print mean and variation of quantity
     #dParams = campaign.get_collation_result()##########################################################
