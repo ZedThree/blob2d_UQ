@@ -174,6 +174,10 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis, par
         analysis.adapt_dimension(param, data_frame)#, method='var')
 
 def plot_sobols(params, sobols):
+    """
+    Plots a bar chart of the sobol indices for each input parameter
+    """
+    
     fig = plt.figure()
     ax = fig.add_subplot(111, title='First-order Sobol indices')
     ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
@@ -184,6 +188,19 @@ def plot_sobols(params, sobols):
     plt.tight_layout()
     plt.savefig("Sobols.png")
     #plt.show()
+
+def save_campaign(filename, campaign, sampler, output_columns):
+    cpnData = [campaign, sampler, output_columns]
+    handle = open(filename, 'w')
+    pickle.dump(cpnData, handle)
+
+def load_campaign(filename):
+    handle = open(filename, 'r')
+    cpnData = pickle.load(handle)
+    campaign = cpnData[0]
+    sampler = cpnData[1]
+    output_columns = cpnData[2]
+    return campaign, sampler, output_columns
             
 ###############################################################################
 
@@ -365,10 +382,16 @@ def analyse_campaign(campaign, sampler, output_columns):
 ###############################################################################
 
 def main():
-    params, vary, output_columns, template = define_params()
-    campaign = setup_campaign(params, output_columns, template)
-    sampler = setup_sampler(vary)
-    run_campaign(campaign, sampler)
+    if 1:
+        params, vary, output_columns, template = define_params()
+        campaign = setup_campaign(params, output_columns, template)
+        sampler = setup_sampler(vary)
+        run_campaign(campaign, sampler)
+        save_campaign("cpnfile.dat", campaign, sampler, output_columns)
+    
+    else:
+        campaign, sampler, output_columns = load_campaign("cpnfile.dat")
+    
     analyse_campaign(campaign, sampler, output_columns)
     
     print("Campaign run & analysed successfuly")
