@@ -69,9 +69,9 @@ class B2dDecoder:
         maxV = float(max(v_x))
         maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
         avgTransp = float(np.mean(ds["transpRate"][:(list(v_x).index(max(v_x)))+1]))
-        massLoss = integrated_density[list(v_x).index(max(v_x))] / integrated_density[0]
+        massLoss = float(integrated_density[list(v_x).index(max(v_x))] / integrated_density[0])
         
-        blobInfo = {"maxV": maxV, "maxX": maxX, "transpRate": transpRate, "massLoss": massLoss}
+        blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss}
         
         return blobInfo
     
@@ -222,7 +222,7 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
         
         # accept one of the multi indices of the new admissible set
         data_frame = campaign.get_collation_result()
-        analysis.adapt_dimension('maxV', data_frame)
+        analysis.adapt_dimension('avgTransp', data_frame)
         #analysis.adapt_dimension('maxV', data_frame, method='var')
             
 ###############################################################################
@@ -253,19 +253,24 @@ def define_params(paramFile=None):
     
     if paramFile == None:
         params = {
-                "Te0": {"type": "float", "default": 5.0},
-                "n0": {"type": "float", "default": 2.0e+18},
-                "D_vort": {"type": "float", "default": 1.0e-6},
-                "D_n": {"type": "float", "default": 1.0e-6},
-                "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},
-                "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},
+                "Te0": {"type": "float", "min": 2.5, "max": 7.5, "default": 5.0},# Ambient temperature
+                "n0": {"type": "float", "min": 1.0e+18, "max": 4.0e+18, "default": 2.0e+18},# Ambient density
+                "D_vort": {"type": "float", "min": 0.9e-7, "max": 1.1e-5, "default": 1.0e-6},# Viscosity
+                "D_n": {"type": "float", "min": 0.9e-7, "max": 1.1e-5, "default": 1.0e-6},# Diffusion
+                "height": {"type": "float", "min": 0.25, "max": 0.75, "default": 0.5},# Blob amplitude
+                "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},# Blob width
         }
         vary = {
-                "height": cp.Uniform(0.25, 0.75),
-                "width": cp.Uniform(0.03, 0.15)# Try different distribution?
+                "Te0": cp.Uniform(2.5, 7.5),
+                "n0": cp.Uniform(1.0e+18, 4.0e+18),
+                "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
+                "D_n": cp.Uniform(1.0e-7, 1.0e-5),
+                #"height": cp.Uniform(0.25, 0.75),
+                #"width": cp.Uniform(0.03, 0.15)
         }
         
-        output_columns = ["maxV"]
+        output_columns = ["avgTransp", "massLoss"]
+        #output_columns = ["maxV", "maxX", "avgTransp", "massLoss"]
         # Show user available and selected output options
         B2dDecoder.show_out_options()
         print("Options selected: ", output_columns, "\n")
@@ -381,18 +386,20 @@ def analyse_campaign(campaign, sampler, output_columns):
     # Print mean and variation of quantity
     #dParams = campaign.get_collation_result()##########################################################
     results = analysis.analyse(dParams)
-    print(f'Mean = {results.describe("maxV", "mean")}')
-    print(f'Standard deviation = {results.describe("maxV", "std")}')
+    print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
+    print(f'Standard deviation = {results.describe("avgTransp", "std")}')
+    print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
+    print(f'Standard deviation = {results.describe("massLoss", "std")}')
     
     # Plot Analysis
     #analysis.adaptation_table()
     #analysis.adaptation_histogram()
-    analysis.get_adaptation_errors()
+    #analysis.get_adaptation_errors()
     
     # Get Sobol indices (online foor loop automatically creates a list without having to append)
     params = sampler.vary.get_keys()# This is used later too
-    sobols = [results._get_sobols_first('maxV', param) for param in params]
-        
+    sobols = [results._get_sobols_first('avgTransp', param) for param in params]
+    
     # Plot sobol indices
     fig = plt.figure()
     ax = fig.add_subplot(111, title='First-order Sobol indices')
@@ -402,7 +409,8 @@ def analyse_campaign(campaign, sampler, output_columns):
     plt.xticks(rotation=90)
     plt.tight_layout()
     plt.savefig("Sobols.png")
-    plt.show()
+    #plt.show()
+    analysis.adaptation_table()
 
 ###############################################################################
 
