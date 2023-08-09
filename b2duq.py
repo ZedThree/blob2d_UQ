@@ -72,7 +72,7 @@ class B2dDecoder:
         massLoss = float(integrated_density[list(v_x).index(max(v_x))] / integrated_density[0])
         
         blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss}
-        
+        print(peak_reached(v_x))
         return blobInfo
     
     def show_out_options():
@@ -81,6 +81,10 @@ class B2dDecoder:
             maxX: the distance the blob propagates before disintegration
             avgTransp: the average rate of transport of the blob (i.e. flux) over its lifetime
             massLoss: the ratio of blob mass at disintegration to initial blob mass""")
+    
+    def peak_reached(vels):
+        if max(vels) != vels[-1]: return True
+        else: return False
     
     def parse_sim_output(self, run_info={}):
         """
@@ -175,6 +179,7 @@ def plot_sobols(params, sobols):
     ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
     ax.set_xticks(range(len(sobols)))
     ax.set_xticklabels(params)
+    ax.set_yscale("log")
     plt.xticks(rotation=90)
     plt.tight_layout()
     plt.savefig("Sobols.png")
@@ -216,7 +221,7 @@ def define_params(paramFile=None):
                 "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},# Blob width
         }
         vary = {
-                #"Te0": cp.Uniform(2.5, 7.5),
+                "Te0": cp.Uniform(2.5, 7.5),
                 "n0": cp.Uniform(1.0e+18, 4.0e+18),
                 "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
                 "D_n": cp.Uniform(1.0e-7, 1.0e-5),
@@ -268,7 +273,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=5 -q -q -q ')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=50 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -337,23 +342,25 @@ def analyse_campaign(campaign, sampler, output_columns):
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
-    # Print mean and variation of quantity
-    #dParams = campaign.get_collation_result()##########################################################
+    # Print mean and variation of quantity and get adaptation errors
     results = analysis.analyse(dParams)
     print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
     print(f'Standard deviation = {results.describe("avgTransp", "std")}')
     print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
     print(f'Standard deviation = {results.describe("massLoss", "std")}')
+    analysis.get_adaptation_errors()
     
-    # Get Sobol indices (online foor loop automatically creates a list without having to append)
-    params = sampler.vary.get_keys()# This is used later too
+    # Get Sobol indices (online for loop automatically creates a list without having to append)
+    params = sampler.vary.get_keys()# This is also used in plot_sobols
     sobols = [results._get_sobols_first('avgTransp', param) for param in params]
+    print(sobols)
     
     # Plot Analysis
     analysis.adaptation_table()
     #analysis.adaptation_histogram()
     #analysis.get_adaptation_errors()
     plot_sobols(params, sobols)
+    plt.show()
 
 ###############################################################################
 
