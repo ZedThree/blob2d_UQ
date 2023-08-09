@@ -108,61 +108,6 @@ class B2dDecoder:
         out_path = os.path.join(run_info['run_dir'], self.target_filename)
         outQtts = self.get_blob_info(out_path)
         return outQtts
-
-class B2dDecoder2:
-    """
-    Custom decoder for blob2d output.
-
-    Parameters
-    ----------
-    target_filename (str)
-        Name of blob2d output file to be decoded.
-    ouput_columns (list)
-        List of output quantities to considered by the campaign
-    """
-    
-    def __init__(self, target_filename, output_columns):
-        self.target_filename = target_filename
-        self.output_columns = output_columns
-        self.output_type = OutputType('sample')
-    
-    def get_blob_info(self, out_path):    
-        """
-        Uses xbout to extract the data from blob2d output files and convert to useful quantities.
-        
-        Parameters
-        ----------
-        out_path (str)
-            Absolute path to the blob2d output files.
-
-        Returns
-        -------
-        blobInfo (dict)
-            Dictionary of quantities which may be called by the campaign.
-        """
-        
-        # Unpack data from blob2d
-        ds = open_boutdataset(out_path, info=False)
-        ds = ds.squeeze(drop=True)
-        dx = ds["dx"].isel(x=0).values
-        ds = ds.drop("x")
-        ds = ds.assign_coords(x=np.arange(ds.sizes["x"])*dx)
-        
-        # Obtain blob info from data
-        blobInfo = {}
-        background_density = 1.0
-        ds["delta_n"] = ds["n"] - background_density
-        integrated_density = ds.bout.integrate_midpoints("delta_n")
-        ds["delta_n*x"] = ds["delta_n"] * ds["x"]
-        ds["CoM_x"] = ds.bout.integrate_midpoints("delta_n*x") / integrated_density
-        v_x = ds["CoM_x"].differentiate("t")
-        
-        # Save useful quantities to dictionary (add more?)
-        maxV = float(max(v_x))
-        maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
-        blobInfo = {"maxV": maxV, "maxX": maxX}
-        
-        return blobInfo
     
     def show_out_options():
         print("""Possible outputs:
@@ -198,7 +143,7 @@ class B2dDecoder2:
 
 ###############################################################################
 
-def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
+def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis, param):
     """
     Refine the sampling plan.
 
@@ -222,8 +167,18 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis):
         
         # accept one of the multi indices of the new admissible set
         data_frame = campaign.get_collation_result()
-        analysis.adapt_dimension('avgTransp', data_frame)
-        #analysis.adapt_dimension('maxV', data_frame, method='var')
+        analysis.adapt_dimension(param, data_frame)#, method='var')
+
+def plot_sobols(params, sobols):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, title='First-order Sobol indices')
+    ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
+    ax.set_xticks(range(len(sobols)))
+    ax.set_xticklabels(params)
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.savefig("Sobols.png")
+    #plt.show()
             
 ###############################################################################
 
@@ -261,13 +216,13 @@ def define_params(paramFile=None):
                 "width": {"type": "float", "min": 0.03, "max": 0.15, "default": 0.09},# Blob width
         }
         vary = {
-                "Te0": cp.Uniform(2.5, 7.5),
+                #"Te0": cp.Uniform(2.5, 7.5),
                 "n0": cp.Uniform(1.0e+18, 4.0e+18),
                 "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
                 "D_n": cp.Uniform(1.0e-7, 1.0e-5),
                 #"height": cp.Uniform(0.25, 0.75),
                 #"width": cp.Uniform(0.03, 0.15)
-        }
+        }# Try latin hypercube?
         
         output_columns = ["avgTransp", "massLoss"]
         #output_columns = ["maxV", "maxX", "avgTransp", "massLoss"]
@@ -313,7 +268,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=5 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -377,11 +332,10 @@ def analyse_campaign(campaign, sampler, output_columns):
     print(analysis.l_norm)
     
     # Refine analysis
-    refine_sampling_plan(2, campaign, sampler, analysis)
+    refine_sampling_plan(2, campaign, sampler, analysis, 'avgTransp')
+    refine_sampling_plan(2, campaign, sampler, analysis, 'massLoss')
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
-    
-    # Save analysis class
     
     # Print mean and variation of quantity
     #dParams = campaign.get_collation_result()##########################################################
@@ -391,26 +345,15 @@ def analyse_campaign(campaign, sampler, output_columns):
     print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
     print(f'Standard deviation = {results.describe("massLoss", "std")}')
     
-    # Plot Analysis
-    #analysis.adaptation_table()
-    #analysis.adaptation_histogram()
-    #analysis.get_adaptation_errors()
-    
     # Get Sobol indices (online foor loop automatically creates a list without having to append)
     params = sampler.vary.get_keys()# This is used later too
     sobols = [results._get_sobols_first('avgTransp', param) for param in params]
     
-    # Plot sobol indices
-    fig = plt.figure()
-    ax = fig.add_subplot(111, title='First-order Sobol indices')
-    ax.bar(range(len(sobols)), height=np.array(sobols).flatten())
-    ax.set_xticks(range(len(sobols)))
-    ax.set_xticklabels(params)
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.savefig("Sobols.png")
-    #plt.show()
+    # Plot Analysis
     analysis.adaptation_table()
+    #analysis.adaptation_histogram()
+    #analysis.get_adaptation_errors()
+    plot_sobols(params, sobols)
 
 ###############################################################################
 
