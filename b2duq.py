@@ -11,6 +11,8 @@ import chaospy as cp
 import os
 import matplotlib.pyplot as plt
 from easyvvuq.actions import CreateRunDirectory, Encode, Decode, ExecuteLocal, Actions
+from pprint import pprint
+from shutil import rmtree
 import pickle
 
 from easyvvuq import OutputType
@@ -33,6 +35,14 @@ class B2dDecoder:
         self.output_columns = output_columns
         self.output_type = OutputType('sample')
     
+    def peak_reached(self, vels):
+        """
+        Returns a boolean describing whether the blob velocity has reached its
+        peak, assuming the velocity grows monotonically up to that point.
+        """
+        if max(vels) != vels[-1]: return True
+        else: return False
+    
     def get_blob_info(self, out_path):    
         """
         Uses xbout to extract the data from blob2d output files and convert to useful quantities.
@@ -46,6 +56,7 @@ class B2dDecoder:
         -------
         blobInfo (dict)
             Dictionary of quantities which may be called by the campaign.
+            Also contains whether the simulation peaked
         """
         
         # Unpack data from blob2d
@@ -70,9 +81,9 @@ class B2dDecoder:
         maxX = float(ds["CoM_x"][list(v_x).index(max(v_x))])
         avgTransp = float(np.mean(ds["transpRate"][:(list(v_x).index(max(v_x)))+1]))
         massLoss = float(integrated_density[list(v_x).index(max(v_x))] / integrated_density[0])
+        peaked = self.peak_reached(list(v_x))
         
-        blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss}
-        print(peak_reached(v_x))
+        blobInfo = {"maxV": maxV, "maxX": maxX, "avgTransp": avgTransp, "massLoss": massLoss, "peaked": peaked}
         return blobInfo
     
     def show_out_options():
@@ -81,42 +92,6 @@ class B2dDecoder:
             maxX: the distance the blob propagates before disintegration
             avgTransp: the average rate of transport of the blob (i.e. flux) over its lifetime
             massLoss: the ratio of blob mass at disintegration to initial blob mass""")
-    
-    def peak_reached(vels):
-        if max(vels) != vels[-1]: return True
-        else: return False
-    
-    def parse_sim_output(self, run_info={}):
-        """
-        Parses a BOUT.dmp.*.nc file from the output of blob2d and converts it to the EasyVVUQ
-        internal dictionary based format.  The file is parsed in such a way that each column
-        appears as a vector QoI in the output dictionary.
-
-        E.g. if the file contains the LHS and `a` & `b` are specified as `output_columns` then:
-        a,b
-        1,2  >>>  {'a': [1, 3], 'b': [2, 4]}.
-        3,4
-
-        Parameters
-        ----------
-        run_info: dict
-            Information about the run used to construct the absolute path to
-            the blob2d output files.
-        
-        Returns
-        -------
-        outQtts (dict)
-            Dictionary of quantities which may be of interest
-        """
-        
-        out_path = os.path.join(run_info['run_dir'], self.target_filename)
-        outQtts = self.get_blob_info(out_path)
-        return outQtts
-    
-    def show_out_options():
-        print("""Possible outputs:
-            maxV: the maximum major radial CoM velocity achieved by the blob
-            maxX: the distance the blob propagates before disintegration""")
     
     def parse_sim_output(self, run_info={}):
         """
@@ -173,6 +148,19 @@ def refine_sampling_plan(number_of_refinements, campaign, sampler, analysis, par
         data_frame = campaign.get_collation_result()
         analysis.adapt_dimension(param, data_frame)#, method='var')
 
+def refine_to_precision(campaign, sampler, analysis, param, tol, maxrefs):
+    """
+    Refines the sampling with respect to an output variable until the adaptation
+    error on that variable is below a certain tolerance
+    """
+    
+    counter = 0
+    error = 1##################################################################################
+    while error > tol and counter<maxrefs:
+        refine_sampling_plan(1, campaign, sampler, analysis, param)
+        counter += 1
+        error = 1##################################################################################
+
 def plot_sobols(params, sobols):
     """
     Plots a bar chart of the sobol indices for each input parameter
@@ -190,16 +178,16 @@ def plot_sobols(params, sobols):
     #plt.show()
 
 def save_campaign(filename, campaign, sampler, output_columns):
-    cpnData = [campaign, sampler, output_columns]
-    handle = open(filename, 'w')
-    pickle.dump(cpnData, handle)
+    with open(filename, 'wb') as handle:
+        cpnData = [campaign, sampler, output_columns]
+        pickle.dump(cpnData, handle)
 
 def load_campaign(filename):
-    handle = open(filename, 'r')
-    cpnData = pickle.load(handle)
-    campaign = cpnData[0]
-    sampler = cpnData[1]
-    output_columns = cpnData[2]
+    with open(filename, 'rb') as handle:
+        cpnData = pickle.load(handle)
+        campaign = cpnData[0]
+        sampler = cpnData[1]
+        output_columns = cpnData[2]
     return campaign, sampler, output_columns
             
 ###############################################################################
@@ -239,15 +227,15 @@ def define_params(paramFile=None):
         }
         vary = {
                 "Te0": cp.Uniform(2.5, 7.5),
-                "n0": cp.Uniform(1.0e+18, 4.0e+18),
+                #"n0": cp.Uniform(1.0e+18, 4.0e+18),
                 "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
                 "D_n": cp.Uniform(1.0e-7, 1.0e-5),
                 #"height": cp.Uniform(0.25, 0.75),
                 #"width": cp.Uniform(0.03, 0.15)
         }# Try latin hypercube?
         
-        output_columns = ["avgTransp", "massLoss"]
-        #output_columns = ["maxV", "maxX", "avgTransp", "massLoss"]
+        #output_columns = ["avgTransp", "massLoss"]
+        output_columns = ["maxV", "maxX", "avgTransp", "massLoss"]
         # Show user available and selected output options
         B2dDecoder.show_out_options()
         print("Options selected: ", output_columns, "\n")
@@ -290,7 +278,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=50 -q -q -q ')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -300,7 +288,12 @@ def setup_campaign(params, output_columns, template):
     # Ensure run directory exists, then pack up encoder, decoder, executor and build campaign
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
-    campaign = uq.Campaign(name='sc_adaptive', work_dir='outfiles', params=params, actions=actions)
+    campaign = uq.Campaign(
+            name='sc_adaptive',
+            #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
+            work_dir='outfiles',
+            params=params,
+            actions=actions)
     
     return campaign
 
@@ -350,12 +343,12 @@ def analyse_campaign(campaign, sampler, output_columns):
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     
     # Run analysis
-    campaign.apply_analysis(analysis)
-    print(analysis.l_norm)
+    #campaign.apply_analysis(analysis)
+    #print(analysis.l_norm)
     
     # Refine analysis
-    refine_sampling_plan(2, campaign, sampler, analysis, 'avgTransp')
-    refine_sampling_plan(2, campaign, sampler, analysis, 'massLoss')
+    #refine_sampling_plan(1, campaign, sampler, analysis, 'avgTransp')
+    #refine_sampling_plan(1, campaign, sampler, analysis, 'massLoss')
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
@@ -367,6 +360,9 @@ def analyse_campaign(campaign, sampler, output_columns):
     print(f'Standard deviation = {results.describe("massLoss", "std")}')
     analysis.get_adaptation_errors()
     
+    print("runs:#########################################")
+    pprint(campaign.list_runs())
+    
     # Get Sobol indices (online for loop automatically creates a list without having to append)
     params = sampler.vary.get_keys()# This is also used in plot_sobols
     sobols = [results._get_sobols_first('avgTransp', param) for param in params]
@@ -374,25 +370,30 @@ def analyse_campaign(campaign, sampler, output_columns):
     
     # Plot Analysis
     analysis.adaptation_table()
-    #analysis.adaptation_histogram()
-    #analysis.get_adaptation_errors()
+    analysis.adaptation_histogram()
+    analysis.get_adaptation_errors()
     plot_sobols(params, sobols)
-    plt.show()
 
 ###############################################################################
 
 def main():
-    if 1:
-        params, vary, output_columns, template = define_params()
+    params, vary, output_columns, template = define_params()
+    sampler = setup_sampler(vary)
+    if 0:
         campaign = setup_campaign(params, output_columns, template)
-        sampler = setup_sampler(vary)
         run_campaign(campaign, sampler)
-        save_campaign("cpnfile.dat", campaign, sampler, output_columns)
+        #campaign.save_state("campaign.json")
+        #save_campaign("cpnfile.dat", campaign, sampler, output_columns)
     
     else:
-        campaign, sampler, output_columns = load_campaign("cpnfile.dat")
+        campaign = uq.Campaign(
+                name='reloaded',
+                db_location="sqlite:///" + "outfiles/sc_adaptivezwu_8u7h/campaign.db")
+        #campaign.init_db(name='reloaded', work_dir="outfiles")
+        #pprint(campaign.list_runs())
+        #campaign, sampler, output_columns = load_campaign("cpnfile.dat")
     
-    analyse_campaign(campaign, sampler, output_columns)
+    #analyse_campaign(campaign, sampler, output_columns)
     
     print("Campaign run & analysed successfuly")
 
