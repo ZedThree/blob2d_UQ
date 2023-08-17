@@ -280,7 +280,7 @@ def setup_campaign(params, output_columns, template):
             target_filename='BOUT.inp')
     
     # Create executor - 50+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=50 -q -q -q ')
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 16 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -358,14 +358,15 @@ def analyse_campaign(campaign, sampler, output_columns):
     """
     # Create analysis class
     frame = campaign.get_collation_result()
-    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    #analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     
     # Run analysis
-    campaign.apply_analysis(analysis)
+    results = campaign.get_last_analysis()
+    analysis = results
     print(analysis.l_norm)
     
     # Print mean and variation of quantity and get adaptation errors
-    results = analysis.analyse(frame)
+    #results = analysis.analyse(frame)
     print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
     print(f'Standard deviation = {results.describe("avgTransp", "std")}')
     print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
@@ -387,7 +388,7 @@ def analyse_campaign(campaign, sampler, output_columns):
 
 def main():
     params, vary, output_columns, template = define_params()
-    if 1:
+    if 0:
         campaign = setup_campaign(params, output_columns, template)
         sampler = setup_sampler(vary)
         run_campaign(campaign, sampler)
@@ -395,14 +396,16 @@ def main():
     else:
         campaign = uq.Campaign(
                 name='reloaded',
-                db_location="sqlite:///" + "outfiles/sc_adaptivezwu_8u7h/campaign.db")
+                db_location="sqlite:///" + "outfiles/campaign.db")
+                #sc_adaptivezwu_8u7h
         sampler = campaign.get_active_sampler()
         campaign.set_sampler(sampler)##################################################
     
-    refinements = refine_campaign()
-    np.savetxt('refinements.txt', np.asarray(refinements))
+    pprint(campaign.list_runs())
+    #refinements = refine_campaign()
+    #np.savetxt('refinements.txt', np.asarray(refinements))
     
-    #analyse_campaign(campaign, sampler, output_columns)
+    analyse_campaign(campaign, sampler, output_columns)
     
     print("Campaign run & analysed successfuly")
 
