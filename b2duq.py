@@ -155,11 +155,13 @@ def refine_to_precision(campaign, sampler, analysis, param, tol, maxrefs):
     """
     
     counter = 0
-    error = 1##################################################################################
-    while error > tol and counter<maxrefs:
+    error = 1
+    while error > tol and counter < maxrefs:
         refine_sampling_plan(1, campaign, sampler, analysis, param)
         counter += 1
-        error = 1##################################################################################
+        error = analysis.get_adaptation_errors()[-1]
+        print(param, "error: ", error)
+    return counter
 
 def plot_sobols(params, sobols):
     """
@@ -227,11 +229,11 @@ def define_params(paramFile=None):
         }
         vary = {
                 "Te0": cp.Uniform(2.5, 7.5),
-                #"n0": cp.Uniform(1.0e+18, 4.0e+18),
+                "n0": cp.Uniform(1.0e+18, 4.0e+18),
                 "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
                 "D_n": cp.Uniform(1.0e-7, 1.0e-5),
-                #"height": cp.Uniform(0.25, 0.75),
-                #"width": cp.Uniform(0.03, 0.15)
+                "height": cp.Uniform(0.25, 0.75),
+                "width": cp.Uniform(0.03, 0.15)
         }# Try latin hypercube?
         
         #output_columns = ["avgTransp", "massLoss"]
@@ -277,8 +279,8 @@ def setup_campaign(params, output_columns, template):
             delimiter='$',
             target_filename='BOUT.inp')
     
-    # Create executor - 60+ timesteps should be resonable (higher np?)
-    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=3 -q -q -q ')
+    # Create executor - 50+ timesteps should be resonable (higher np?)
+    execute = ExecuteLocal(f'nice -n 11 mpirun -np 32 {os.getcwd()}/blob2d -d ./ nout=50 -q -q -q ')
     
     # Create decoder
     decoder = B2dDecoder(
@@ -289,7 +291,7 @@ def setup_campaign(params, output_columns, template):
     if os.path.exists('outfiles')==0: os.mkdir('outfiles')
     actions = Actions(CreateRunDirectory('outfiles'), Encode(encoder), execute, Decode(decoder))
     campaign = uq.Campaign(
-            name='sc_adaptive',
+            name='MAIN-RUN',
             #db_location="sqlite:///" + os.getcwd() + "/campaign.db",
             work_dir='outfiles',
             params=params,
@@ -321,6 +323,22 @@ def run_campaign(campaign, sampler):
     campaign.set_sampler(sampler)
     campaign.execute().collate(progress_bar=True)
 
+def refine_campaign(campaign, sampler, output_columns):
+    # Create analysis class
+    frame = campaign.get_collation_result()
+    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
+    
+    # Run analysis
+    campaign.apply_analysis(analysis)
+    print(analysis.l_norm)
+    
+    atRefs = refine_to_precision(campaign, sampler, analysis, 'avgTransp', 0.01, 10)
+    mlRefs = refine_to_precision(campaign, sampler, analysis, 'massLoss', 0.01, 10)
+    campaign.apply_analysis(analysis)
+    print(analysis.l_norm)
+    
+    return [atRefs, mlRefs]
+
 def analyse_campaign(campaign, sampler, output_columns):
     """
     Runs a set of analyses on a provided campaign, details often change by commit.
@@ -339,29 +357,20 @@ def analyse_campaign(campaign, sampler, output_columns):
     None - results either printed to screen, plotted or saved to a file.
     """
     # Create analysis class
-    dParams = campaign.get_collation_result()
+    frame = campaign.get_collation_result()
     analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
     
     # Run analysis
-    #campaign.apply_analysis(analysis)
-    #print(analysis.l_norm)
-    
-    # Refine analysis
-    #refine_sampling_plan(1, campaign, sampler, analysis, 'avgTransp')
-    #refine_sampling_plan(1, campaign, sampler, analysis, 'massLoss')
     campaign.apply_analysis(analysis)
     print(analysis.l_norm)
     
     # Print mean and variation of quantity and get adaptation errors
-    results = analysis.analyse(dParams)
+    results = analysis.analyse(frame)
     print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
     print(f'Standard deviation = {results.describe("avgTransp", "std")}')
     print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
     print(f'Standard deviation = {results.describe("massLoss", "std")}')
     analysis.get_adaptation_errors()
-    
-    print("runs:#########################################")
-    pprint(campaign.list_runs())
     
     # Get Sobol indices (online for loop automatically creates a list without having to append)
     params = sampler.vary.get_keys()# This is also used in plot_sobols
@@ -378,20 +387,20 @@ def analyse_campaign(campaign, sampler, output_columns):
 
 def main():
     params, vary, output_columns, template = define_params()
-    sampler = setup_sampler(vary)
-    if 0:
+    if 1:
         campaign = setup_campaign(params, output_columns, template)
+        sampler = setup_sampler(vary)
         run_campaign(campaign, sampler)
-        #campaign.save_state("campaign.json")
-        #save_campaign("cpnfile.dat", campaign, sampler, output_columns)
-    
+        refine_campaign(campaign, sampler, output_columns)
     else:
         campaign = uq.Campaign(
                 name='reloaded',
                 db_location="sqlite:///" + "outfiles/sc_adaptivezwu_8u7h/campaign.db")
-        #campaign.init_db(name='reloaded', work_dir="outfiles")
-        #pprint(campaign.list_runs())
-        #campaign, sampler, output_columns = load_campaign("cpnfile.dat")
+        sampler = campaign.get_active_sampler()
+        campaign.set_sampler(sampler)##################################################
+    
+    refinements = refine_campaign()
+    np.savetxt('refinements.txt', np.asarray(refinements))
     
     #analyse_campaign(campaign, sampler, output_columns)
     
