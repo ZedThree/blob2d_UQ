@@ -28,6 +28,18 @@ CAMPAIGN_NAME = "delta_star."
 QOIS = ["com_x", "com_v_x", "peak_com_v_x"]
 
 
+def rho_s(B0, Te0):
+    e = 1.602e-19
+    m_i = 2 * 1.667e-27
+    Omega_i = e * B0 / m_i
+    c_s = np.sqrt(e * Te0 / m_i)
+    return c_s / Omega_i
+
+
+def delta_star(L_par, R_c, B0, Te0):
+    return (L_par**2 / (R_c * rho_s(B0, Te0))) ** 1 / 5
+
+
 class B2dDecoder:
     """
     Custom decoder for blob2d output.
@@ -90,6 +102,12 @@ class B2dDecoder:
             "com_x": ds["CoM_x"].values.flatten().tolist(),
             "com_v_x": ds["CoM_vx"].values.flatten().tolist(),
             "peak_com_v_x": ds["CoM_vx"].max().values.flatten().tolist(),
+            "delta_star": delta_star(
+                L_par=run_info["L_par"],
+                R_c=run_info["R_c"],
+                B0=run_info["B0"],
+                Te0=run_info["Te0"],
+            ),
         }
 
     def get_outputs(self, run_info):
@@ -232,13 +250,13 @@ def define_params(paramFile=None):
         },
     }
     vary = {
-        "Te0": cp.Uniform(2.5, 7.5),
+        "Te0": cp.Uniform(1.0, 100.0),
         # "n0": cp.Uniform(1.0e+18, 4.0e+18),
         # "D_vort": cp.Uniform(1.0e-7, 1.0e-5),
         # "D_n": cp.Uniform(1.0e-7, 1.0e-5),
         # "height": cp.Uniform(0.25, 0.75),
         # "width": cp.Uniform(0.03, 0.15)
-        "L_par": cp.Uniform(1.0, 100.0),
+        "L_par": cp.Uniform(0.1, 1000.0),
         "R_c": cp.Uniform(0.1, 10.0),
         "B0": cp.Uniform(0.03, 2.5),
     }  # Try latin hypercube?
@@ -307,51 +325,6 @@ def setup_sampler(vary):
     )
 
     return sampler
-
-
-def analyse_campaign(campaign, sampler, output_columns):
-    """
-    Runs a set of analyses on a provided campaign, details often change by commit.
-
-    Parameters
-    ----------
-    campaign (easyvvuq Campaign object)
-        The campaign being analysed
-    sampler (easyvvuq SCSampler object)
-        The sampler being used
-    output_columns (dict)
-        List of output quantities under consideration
-
-    Returns
-    -------
-    None - results either printed to screen, plotted or saved to a file.
-    """
-    # Create analysis class
-    frame = campaign.get_collation_result()
-    analysis = uq.analysis.SCAnalysis(sampler=sampler, qoi_cols=output_columns)
-
-    # Run analysis
-    campaign.apply_analysis(analysis)
-    print(analysis.l_norm)
-
-    # Print mean and variation of quantity and get adaptation errors
-    results = analysis.analyse(frame)
-    print(f'Mean transport rate = {results.describe("avgTransp", "mean")}')
-    print(f'Standard deviation = {results.describe("avgTransp", "std")}')
-    print(f'Mean mass loss = {results.describe("massLoss", "mean")}')
-    print(f'Standard deviation = {results.describe("massLoss", "std")}')
-    analysis.get_adaptation_errors()
-
-    # Get Sobol indices (online for loop automatically creates a list without having to append)
-    params = sampler.vary.get_keys()  # This is also used in plot_sobols
-    sobols = [results._get_sobols_first("avgTransp", param) for param in params]
-    print(sobols)
-
-    # Plot Analysis
-    analysis.adaptation_table()
-    analysis.adaptation_histogram()
-    analysis.get_adaptation_errors()
-    plot_sobols(params, sobols)
 
 
 ###############################################################################
@@ -454,7 +427,7 @@ def first_time_setup():
     analysis.save_state(f"{campaign.campaign_dir}/analysis.state")
     plot_grid_2D(campaign, analysis, 0, f"{campaign.campaign_dir}/grid0.png")
 
-    for i in np.arange(1, 5):
+    for i in np.arange(1, 10):
         refine_once(campaign, analysis, i)
     time_end = time.time()
 
